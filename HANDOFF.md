@@ -35,7 +35,8 @@ and a public download, and every bug found and fixed on the way),
 |---|---|---|
 | `claude/laughing-cray-ayao6i` | `a93f468` | **The development branch. All work in this handoff is here.** |
 | `image-desktop` | `d2735b6` | No source code. The desktop image in gzip pieces (v1 at the top level, v2 in `v2/`) and the published test installer. Its `README.md` has the hashes. |
-| `claude/linux-distro-from-scratch-tt5dx1` | `ef2300a` | **Another chat's branch.** Two commits there are NOT on the development branch (section 6). Do not push to it, merge it or rebase it unless the user asks. |
+| `claude/linux-distro-from-scratch-tt5dx1` | `787e598` | **The other chat's branch.** Its `aurfirst` fix, `firstboottest`, and its own handoff (`docs/handoff/BRANCHES.md`, `STATE.md`, `OPEN.md`, `TRAPS.md`) are **merged into `main`** as of 2026-09-25. Read `docs/handoff/TRAPS.md` before touching the tests. |
+| `main` | | **The integration branch on `aarohkandy/auros-from-scratch`**: the development branch plus the other chat's branch, merged. Work continues here. |
 
 No pull requests have been opened; open one only if the user asks.
 
@@ -155,8 +156,8 @@ The user was about to try the installer on a spare laptop.
    under Wine (which has no firmware variables) and the simulation. If
    the user reports a result from the laptop, a photo of the staging
    screen with its `verdict=` line is the key evidence.
-2. **The other chat's two commits are not merged** (`2d85777`, `ef2300a`
-   on `claude/linux-distro-from-scratch-tt5dx1`):
+2. **The other chat's two commits are now merged into `main`** (`2d85777`, `ef2300a`
+   from `claude/linux-distro-from-scratch-tt5dx1`; the published v2 image predates them):
    - `2d85777` fixes a real aurfirst bug: after "Put Windows back" and a
      second install, aurfirst picked the dead firmware entry called
      "AurOS" and the machine went back to Windows. It adds
