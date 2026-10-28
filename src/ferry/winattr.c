@@ -204,9 +204,17 @@ static const char *classify(const struct stat *st, uint32_t attrib, uint32_t tag
      * attribute was readable. This is the one place the optimistic
      * answer is defensible: blocks are ground truth, not a guess. */
     if (st->st_size == 0)     return "hydrated";
-    if (st->st_blocks == 0)
+    if (st->st_blocks == 0) {
+        /* A small file's bytes live inside its MFT record: the kernel
+         * reports no blocks for it, and it is the commonest thing on a
+         * disk (every note, every shortcut). Measured on ntfs3 and
+         * ntfs-3g: a 3-byte file has 0 blocks. A record holds about 700
+         * bytes, so up to 1024 with no blocks is that, not a stub; the
+         * attribute checks above are what catch a small placeholder. */
+        if (st->st_size <= 1024) return "hydrated";
         return have_attrib && (attrib & (FA_COMPRESSED | FA_SPARSE_FILE))
                ? "hydrated" : "suspect";
+    }
     return "hydrated";
 }
 

@@ -305,6 +305,14 @@ for _habit in 'mkdir -p "$FERRY_HOME/.config"' 'cp -p "$_f" "$_dest/x"' 'chown -
     refute "(proof) the lint catches: $_habit" lint_home_writes "$TMP/habit.sh"
 done
 
+# ── what the classifier says about a small file with no blocks ─────
+# (NTFS keeps a small file inside its record; the kernel says 0 blocks.)
+WA="$FERRY/build/ferry-winattr"
+: > "$TMP/resident"; truncate -s 500 "$TMP/resident"
+: > "$TMP/stub";     truncate -s 5000000 "$TMP/stub"
+eq "a 500-byte file with no blocks is a real file (it lives in the record)" "$("$WA" "$TMP/resident" | cut -f1)" hydrated
+eq "a 5 MB file with no blocks and no attribute is still doubted" "$("$WA" "$TMP/stub" | cut -f1)" suspect
+
 echo
 printf 'ferry-copy tests: %d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]

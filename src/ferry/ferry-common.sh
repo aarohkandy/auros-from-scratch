@@ -368,15 +368,29 @@ require_clean_volume() {
 # the `ro` is passed twice (driver option and mount flag) on purpose,
 # because one typo here is the difference between a migration and a
 # destroyed Windows install.
+# Is this mount point mounted, and read-only? /proc/mounts lists the
+# options as one comma-separated word ("ro,relatime,..."), with "ro" FIRST,
+# so it is never preceded by a comma or a bracket. The first version of
+# this check looked for one and so failed every mount it was ever given:
+# Ferry could not mount a Windows disk at all, and no test noticed
+# because no test mounted anything (tests/ntfs.sh does now).
+mounted_ro() {
+    awk -v m="$1" '$2 == m { n = split($4, o, ","); r = 0; w = 0
+                             for (i = 1; i <= n; i++) { if (o[i] == "ro") r = 1; if (o[i] == "rw") w = 1 }
+                             found = 1; ok = (r && !w) }
+                   END { exit !(found && ok) }' /proc/mounts 2>/dev/null
+}
+
+# FERRY_MOUNT_FS: which drivers to try, in order (the tests pick one).
 mount_ro() {
     _dev=$1 _mnt=$2
     mkdir -p "$_mnt" || return 1
     if mountpoint -q "$_mnt" 2>/dev/null; then return 0; fi
-    for _fs in ntfs3 ntfs ntfs-3g; do
+    for _fs in ${FERRY_MOUNT_FS:-ntfs3 ntfs ntfs-3g}; do
         if mount -t "$_fs" -o ro,noatime,nosuid,nodev,noexec \
                  "$_dev" "$_mnt" 2>/dev/null; then
             # Belt and braces: verify the kernel agrees it is read-only.
-            if grep -q " $_mnt .*[(,]ro[,)]" /proc/mounts 2>/dev/null; then
+            if mounted_ro "$_mnt"; then
                 return 0
             fi
             umount "$_mnt" 2>/dev/null || true

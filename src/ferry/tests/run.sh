@@ -218,7 +218,7 @@ refute "no password file anywhere under the new home" \
 
 # ── ferry-copy: the copy of her files, as her (tests/copy*.sh) ─────
 skip=0
-for _t in copy copy-root; do
+for _t in copy copy-root ntfs; do
     _o=$(sh "$HERE/$_t.sh" 2>&1)
     printf '%s\n' "$_o" | grep -v -e '^$' -e ' tests: [0-9]'
     pass=$((pass + $(printf '%s\n' "$_o" | grep -c '^  ok ')))
