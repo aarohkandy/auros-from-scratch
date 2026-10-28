@@ -148,6 +148,9 @@ jobs:
         run: |
           cc -O2 -std=gnu11 -o "$RUNNER_TEMP/sessionenvtest" tools/sessionenvtest.c src/aurshell/run.c -I src/aurshell
           "$RUNNER_TEMP/sessionenvtest" 2>&1 | tee transcripts/sessionenvtest.txt
+      - name: fuzz regressions (every input that ever crashed a parser, under ASan+UBSan)
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        run: sh tools/fuzz/regress.sh "$RUNNER_TEMP/fuzz" 2>&1 | tee transcripts/fuzz-regress.txt
       - name: looktest
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: |
