@@ -36,6 +36,7 @@ FERRY_VERSION="0.1.0"
 : "${FERRY_FORCE:=0}"
 : "${FERRY_PROGRESS:=}"      # optional file the UI tails, JSON lines
 : "${FERRY_STAGE:=ferry}"
+: "${FERRY_PLAIN:=0}"        # 1: plain words for her on stdout, chatter to stderr
 
 # Tools and data ship together. Running straight out of the source tree
 # has to work, because that is how this gets debugged.
@@ -180,6 +181,7 @@ common_opt() {
         --quiet)    FERRY_QUIET=1;  _consumed=1 ;;
         --json)     FERRY_JSON=1;   _consumed=1 ;;
         --force)    FERRY_FORCE=1;  _consumed=1 ;;
+        --plain)    FERRY_PLAIN=1;  _consumed=1 ;;
         *)          _consumed=0 ;;
     esac
 }
@@ -404,18 +406,25 @@ hive_keys()   { ferry-hive keys   "$1" "$2" 2>/dev/null || return 1; }
 # ═══ Destination ════════════════════════════════════════════════════
 
 # Who are we importing FOR. On a first boot there is exactly one real
-# user; guessing wrong would scatter somebody's documents into /root.
+# user; guessing wrong would scatter somebody's documents into /root, so
+# there is no fallback to root's own home: no person, no import.
+# FERRY_UID / FERRY_GID are what ferry-copy becomes before it touches a
+# single path of hers.
 resolve_target() {
     if [ -z "$FERRY_OWNER" ]; then
         FERRY_OWNER=$(awk -F: '$3 >= 1000 && $3 < 60000 && $1 != "nobody" { print $1; exit }' \
                       /etc/passwd 2>/dev/null || true)
+        # A developer running from a checkout, not as root: themselves.
+        if [ -z "$FERRY_OWNER" ] && [ "$(id -u)" != 0 ]; then FERRY_OWNER=$(id -un); fi
     fi
-    if [ -z "$FERRY_HOME" ] && [ -n "$FERRY_OWNER" ]; then
+    [ -n "$FERRY_OWNER" ] || die "there is no person on this computer to bring the files to"
+    FERRY_UID=$(id -u "$FERRY_OWNER" 2>/dev/null) && FERRY_GID=$(id -g "$FERRY_OWNER" 2>/dev/null) \
+        || die "no such user '$FERRY_OWNER'"
+    if [ -z "$FERRY_HOME" ]; then
         FERRY_HOME=$(awk -F: -v u="$FERRY_OWNER" '$1 == u { print $6; exit }' \
                      /etc/passwd 2>/dev/null || true)
     fi
-    [ -n "$FERRY_HOME" ] || FERRY_HOME="${HOME:-/root}"
-    [ -d "$FERRY_HOME" ] || mkdir -p "$FERRY_HOME"
+    [ -n "$FERRY_HOME" ] || die "cannot find the home folder of '$FERRY_OWNER'"
 }
 
 # XDG user dirs, honouring a localized user-dirs.dirs if the desktop has
@@ -429,74 +438,65 @@ xdg_dir() {
              "$_f" | head -1 | sed 's/"$//')
         if [ -n "$_v" ]; then
             _v=$(printf '%s' "$_v" | sed "s|^\$HOME|$FERRY_HOME|")
-            printf '%s\n' "$_v"
-            return 0
+            # Only a place under her home, and never a way out of it: the
+            # file is hers to edit, and what it says becomes a path.
+            case "$_v" in
+                "$FERRY_HOME"/*)
+                    case "/$_v/" in */../*|*/./*) ;; *) printf '%s\n' "$_v"; return 0 ;; esac ;;
+            esac
         fi
     fi
     printf '%s\n' "$FERRY_HOME/$_default"
 }
 
-own() {
-    [ -n "$FERRY_OWNER" ] || return 0
-    [ "$FERRY_DRYRUN" = 1 ] && return 0
-    chown -R "$FERRY_OWNER" "$1" 2>/dev/null || true
-}
-
 # ═══ Copying ════════════════════════════════════════════════════════
+#
+# NOTHING IN FERRY WRITES INTO HER HOME AS ROOT. Her home is hers: a
+# program running as her can put a symbolic link anywhere in it, and a
+# root `cp`, `mkdir -p`, `chown -R` or `> file` would follow it. Every
+# write there goes through ferry-copy, which gives up root before it
+# opens a path of hers and never follows a link (src/ferry/copy.c). The
+# test suite greps this tree for the old habits and plants hostile links
+# to prove it.
 
-file_size()  { stat -c %s "$1" 2>/dev/null || wc -c < "$1" 2>/dev/null || echo 0; }
-file_mtime() { stat -c %Y "$1" 2>/dev/null || echo 0; }
-
-# Same file, for the purpose of "have I already imported this?". Size
-# plus mtime, not a hash: hashing a 40 GB Pictures folder on a 2013
-# laptop to re-confirm what we copied ten minutes ago is not a feature.
-same_file() {
-    [ -f "$1" ] && [ -f "$2" ] || return 1
-    [ "$(file_size "$1")" = "$(file_size "$2")" ] || return 1
-    _d=$(( $(file_mtime "$1") - $(file_mtime "$2") ))
-    [ "$_d" -lt 0 ] && _d=$(( -_d ))
-    [ "$_d" -le 2 ]
+# Copy folders or files as her. Arguments after the options are
+# `--job LABEL SRCDIR DESTDIR` / `--file LABEL SRCFILE DESTFILE`.
+# Notes ferry-copy wrote are folded into the report. Exit codes:
+# 0 all done, 2 done but some things were not copied (already in the
+# report), anything else is a stop.
+her_copy() {
+    _hc_notes="$FERRY_STATE/plan/$FERRY_STAGE.notes"
+    : > "$_hc_notes"
+    _hc_rc=0
+    ferry-copy --uid "$FERRY_UID" --gid "$FERRY_GID" --home "$FERRY_HOME" \
+        --stage "$FERRY_STAGE" --notes "$_hc_notes" \
+        --manifest "$FERRY_STATE/manifest.tsv" --state "$FERRY_STATE" \
+        ${FERRY_PROGRESS:+--progress "$FERRY_PROGRESS"} \
+        $([ "${FERRY_PLAIN:-0}" = 1 ] && echo --plain) \
+        $([ "$FERRY_DRYRUN" = 1 ] && echo --dry-run) \
+        "$@" || _hc_rc=$?
+    merge_notes "$_hc_notes"
+    return "$_hc_rc"
 }
 
-# The name a file gets when something is already sitting in its place.
-# Keeping both copies is the only defensible answer: the existing file
-# might be the user's, and Windows' copy might be newer. We never pick.
-collision_name() {
-    case "$1" in
-        */*.*) printf '%s (from Windows).%s\n' "${1%.*}" "${1##*.}" ;;
-        *)     printf '%s (from Windows)\n' "$1" ;;
-    esac
+# Append ferry-copy's ledger rows to this stage's ledger, skipping rows
+# already there (a resumed run must not say everything twice).
+merge_notes() {
+    ferry_state_init
+    _mn_l="$FERRY_STATE/report.d/$FERRY_STAGE.tsv"
+    [ -f "$_mn_l" ] || : > "$_mn_l"
+    awk 'NR==FNR { seen[$0] = 1; next } !($0 in seen) { seen[$0] = 1; print }' \
+        "$_mn_l" "$1" >> "$_mn_l"
+    rm -f "$1"
 }
 
-# The only function in Ferry allowed to create a file in the user's home.
-#   - writes through a .ferrypart temp so a half-copy never exists at
-#     the destination, which is what makes resume safe;
-#   - never overwrites: an occupied destination gets a second file and a
-#     recorded collision;
-#   - records what it did, always.
-# Prints the action taken: copied | already | collision | failed
-safe_copy() {
-    _s=$1 _d=$2
-    if [ -e "$_d" ]; then
-        if same_file "$_s" "$_d"; then echo already; return 0; fi
-        _d2=$(collision_name "$_d")
-        if [ -e "$_d2" ] && same_file "$_s" "$_d2"; then echo already; return 0; fi
-        note files partial "${_s#"$FERRY_ROOT"/}" \
-            "a different file already existed at $_d; imported alongside it as $(basename "$_d2")"
-        record collision "$(file_size "$_s")" "$_s" "$_d2"
-        _d=$_d2
-    fi
-    if [ "$FERRY_DRYRUN" = 1 ]; then echo copied; return 0; fi
-    mkdir -p "$(dirname "$_d")" 2>/dev/null || { echo failed; return 1; }
-    if cp -p "$_s" "$_d.ferrypart" 2>/dev/null && mv -f "$_d.ferrypart" "$_d" 2>/dev/null; then
-        record copy "$(file_size "$_d")" "$_s" "$_d"
-        echo copied
-        return 0
-    fi
-    rm -f "$_d.ferrypart" 2>/dev/null || true
-    record failed 0 "$_s" "$_d"
-    echo failed
-    return 1
+# Write stdin to one file in her home, as her (atomically, no link
+# followed). Extra options: --keep-existing, --backup SUFFIX.
+her_put() {
+    _hp_dest=$1; shift
+    [ "$FERRY_DRYRUN" = 1 ] && { cat >/dev/null; return 0; }
+    ferry-copy put --uid "$FERRY_UID" --gid "$FERRY_GID" --home "$FERRY_HOME" \
+        "$@" "$_hp_dest"
 }
 
 # ── Deterministic UUIDs. NetworkManager wants a UUID per connection;

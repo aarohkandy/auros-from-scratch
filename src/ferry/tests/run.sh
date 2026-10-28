@@ -20,6 +20,14 @@ export PATH="$FERRY:$FERRY/build:$PATH"
 export FERRY_HIVE_BACKEND=hivepeek
 export NO_COLOR=1
 
+# The copy of her files refuses to run as root (it becomes her), so the
+# suite is run by an ordinary user; the half that needs root re-runs
+# itself through sudo (tests/copy-root.sh).
+if [ "$(id -u)" = 0 ]; then
+    echo "run this as an ordinary user, not root (tests/copy-root.sh starts its own root half through sudo)"
+    exit 2
+fi
+
 TMP=$(mktemp -d "${TMPDIR:-/tmp}/ferrytest.XXXXXX")
 trap 'rm -rf "$TMP"' EXIT
 WIN="$TMP/win"
@@ -208,6 +216,16 @@ refute "no Wi-Fi key, no Firefox login, anywhere under the new home or state" \
 refute "no password file anywhere under the new home" \
     sh -c "find '$HOME1' -iname 'logins*.json' -o -iname 'key[34].db' -o -iname 'signons*' | grep -q ."
 
+# ── ferry-copy: the copy of her files, as her (tests/copy*.sh) ─────
+skip=0
+for _t in copy copy-root; do
+    _o=$(sh "$HERE/$_t.sh" 2>&1)
+    printf '%s\n' "$_o" | grep -v -e '^$' -e ' tests: [0-9]'
+    pass=$((pass + $(printf '%s\n' "$_o" | grep -c '^  ok ')))
+    fail=$((fail + $(printf '%s\n' "$_o" | grep -c '^  FAIL')))
+    skip=$((skip + $(printf '%s\n' "$_o" | grep -c '^  SKIP')))
+done
+
 echo "install list:"
 for _f in $(sh "$FERRY/install.sh" list); do
     [ -f "$FERRY/$_f" ] || bad "install.sh names $_f, which does not exist"
@@ -231,5 +249,7 @@ else
 fi
 
 echo
-printf 'ferry tests: %d passed, %d failed\n' "$pass" "$fail"
+printf 'ferry tests: %d passed, %d failed' "$pass" "$fail"
+[ "$skip" -eq 0 ] || printf ', %d SKIPPED (not exercised)' "$skip"
+printf '\n'
 [ "$fail" -eq 0 ]

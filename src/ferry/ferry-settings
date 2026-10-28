@@ -215,8 +215,9 @@ if want wallpaper; then
         _wpdest="$FERRY_HOME/.local/share/backgrounds/windows-wallpaper"
         # Keep the extension when there is one; TranscodedWallpaper has none.
         case "$_wp" in *.*) _wpdest="$_wpdest.${_wp##*.}" ;; esac
-        [ "$FERRY_DRYRUN" = 1 ] || mkdir -p "$(dirname "$_wpdest")"
-        _act=$(safe_copy "$_wp" "$_wpdest")
+        # As her, not as root: ~/.local is hers to put links in.
+        _act=failed
+        if her_copy --file Wallpaper "$_wp" "$_wpdest" >/dev/null; then _act=copied; fi
         if [ "$_act" = copied ] || [ "$_act" = already ]; then
             _fit=fill
             case "$_style" in
@@ -224,7 +225,6 @@ if want wallpaper; then
                 0)  _fit=center ;; 22) _fit=span ;;
             esac
             suggest wallpaper "$_wpdest" "fit=$_fit"
-            own "$(dirname "$_wpdest")"
             say "wallpaper imported ($_fit)"
         fi
     else
@@ -260,7 +260,6 @@ if want mapped-drives && [ -n "$_nt" ]; then
     done
 fi
 
-[ "$FERRY_DRYRUN" = 1 ] || own "$FERRY_HOME/.local" 2>/dev/null || true
 say "settings: suggestions written to $SUGG"
 stage_done settings
 exit 0

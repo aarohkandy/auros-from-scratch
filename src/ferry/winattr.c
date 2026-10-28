@@ -95,21 +95,7 @@ static const char *REPARSE_XATTRS[] = {
     "user.ntfs_reparse_data",
 };
 
-static int   opt_json = 0, opt_nul = 0;
-static int   exit_code = 0;
 static char *map_path;                  /* FERRY_WINATTR_MAP, test seam */
-
-static int read_u32_xattr(const char *path, const char *name, int be, uint32_t *out)
-{
-    unsigned char b[8];
-    ssize_t n = lgetxattr(path, name, b, sizeof b);
-    if (n < 4) return 0;
-    *out = be ? ((uint32_t)b[0] << 24 | (uint32_t)b[1] << 16 |
-                 (uint32_t)b[2] << 8  | b[3])
-              : ((uint32_t)b[3] << 24 | (uint32_t)b[2] << 16 |
-                 (uint32_t)b[1] << 8  | b[0]);
-    return 1;
-}
 
 /* The test seam again: a TSV of `path <tab> attrib <tab> tag`, consulted
  * before the filesystem. Only active when FERRY_WINATTR_MAP is set, and
@@ -141,47 +127,47 @@ static int map_lookup(const char *path, uint32_t *attrib, uint32_t *tag)
     return hit;
 }
 
+/* Read the attribute word and reparse tag for one file. `fd` is an open
+ * descriptor for it, or -1 to go by path (never following a link).
+ * Returns 1 when some attribute source answered. ferry-copy calls this
+ * on the descriptor it is about to read from, so the answer is about
+ * THAT file and not about whatever the name points at a moment later. */
+static int wa_read(int fd, const char *path, uint32_t *attrib, uint32_t *tag)
+{
+    size_t i;
+    int have = 0;
+    *attrib = 0; *tag = 0;
+    if (map_lookup(path, attrib, tag)) return 1;
+    for (i = 0; i < sizeof ATTR_XATTRS / sizeof ATTR_XATTRS[0]; i++) {
+        unsigned char b[8];
+        ssize_t n = fd >= 0 ? fgetxattr(fd, ATTR_XATTRS[i].name, b, sizeof b)
+                            : lgetxattr(path, ATTR_XATTRS[i].name, b, sizeof b);
+        if (n < 4) continue;
+        *attrib = ATTR_XATTRS[i].big_endian
+            ? ((uint32_t)b[0] << 24 | (uint32_t)b[1] << 16 |
+               (uint32_t)b[2] << 8  | b[3])
+            : ((uint32_t)b[3] << 24 | (uint32_t)b[2] << 16 |
+               (uint32_t)b[1] << 8  | b[0]);
+        have = 1;
+        break;
+    }
+    for (i = 0; i < sizeof REPARSE_XATTRS / sizeof REPARSE_XATTRS[0]; i++) {
+        unsigned char b[16];
+        ssize_t n = fd >= 0 ? fgetxattr(fd, REPARSE_XATTRS[i], b, sizeof b)
+                            : lgetxattr(path, REPARSE_XATTRS[i], b, sizeof b);
+        if (n >= 4) {
+            *tag = (uint32_t)b[0] | ((uint32_t)b[1] << 8) |
+                   ((uint32_t)b[2] << 16) | ((uint32_t)b[3] << 24);
+            break;
+        }
+    }
+    return have;
+}
+
 static int is_cloud_tag(uint32_t tag)
 {
     return tag && ((tag & TAG_CLOUD_MASK) == TAG_CLOUD_BASE ||
                    tag == TAG_ONEDRIVE || tag == TAG_PROJFS);
-}
-
-static const char *tag_name(uint32_t tag)
-{
-    if (!tag) return "";
-    if ((tag & TAG_CLOUD_MASK) == TAG_CLOUD_BASE) return "cloud";
-    switch (tag) {
-        case TAG_ONEDRIVE:   return "onedrive";
-        case TAG_PROJFS:     return "projfs";
-        case TAG_MOUNT_POINT:return "junction";
-        case TAG_SYMLINK:    return "symlink";
-        case TAG_DEDUP:      return "dedup";
-        case TAG_WCI:        return "wci";
-        case TAG_APPEXECLINK:return "appexeclink";
-        case TAG_LX_SYMLINK: return "wsl-symlink";
-        default:             return "other";
-    }
-}
-
-static void flag_names(uint32_t a, char *out, size_t n)
-{
-    struct { uint32_t bit; const char *nm; } t[] = {
-        { FA_READONLY, "readonly" }, { FA_HIDDEN, "hidden" },
-        { FA_SYSTEM, "system" },     { FA_SPARSE_FILE, "sparse" },
-        { FA_REPARSE_POINT, "reparse" }, { FA_COMPRESSED, "compressed" },
-        { FA_OFFLINE, "offline" },   { FA_ENCRYPTED, "encrypted" },
-        { FA_RECALL_ON_OPEN, "recall-on-open" },
-        { FA_PINNED, "pinned" },     { FA_UNPINNED, "unpinned" },
-        { FA_RECALL_ON_DATA_ACCESS, "recall-on-access" },
-    };
-    size_t i, o = 0;
-    out[0] = '\0';
-    for (i = 0; i < sizeof t / sizeof t[0]; i++)
-        if (a & t[i].bit)
-            o += (size_t)snprintf(out + o, o < n ? n - o : 0, "%s%s",
-                                  o ? "," : "", t[i].nm);
-    if (!out[0]) snprintf(out, n, "-");
 }
 
 /* The decision. Ordered so that every path that might not hold data is
@@ -224,6 +210,46 @@ static const char *classify(const struct stat *st, uint32_t attrib, uint32_t tag
     return "hydrated";
 }
 
+#ifndef WINATTR_AS_LIBRARY   /* ferry-copy includes this file for the above */
+static int   opt_json = 0, opt_nul = 0;
+static int   exit_code = 0;
+static const char *tag_name(uint32_t tag)
+{
+    if (!tag) return "";
+    if ((tag & TAG_CLOUD_MASK) == TAG_CLOUD_BASE) return "cloud";
+    switch (tag) {
+        case TAG_ONEDRIVE:   return "onedrive";
+        case TAG_PROJFS:     return "projfs";
+        case TAG_MOUNT_POINT:return "junction";
+        case TAG_SYMLINK:    return "symlink";
+        case TAG_DEDUP:      return "dedup";
+        case TAG_WCI:        return "wci";
+        case TAG_APPEXECLINK:return "appexeclink";
+        case TAG_LX_SYMLINK: return "wsl-symlink";
+        default:             return "other";
+    }
+}
+
+static void flag_names(uint32_t a, char *out, size_t n)
+{
+    struct { uint32_t bit; const char *nm; } t[] = {
+        { FA_READONLY, "readonly" }, { FA_HIDDEN, "hidden" },
+        { FA_SYSTEM, "system" },     { FA_SPARSE_FILE, "sparse" },
+        { FA_REPARSE_POINT, "reparse" }, { FA_COMPRESSED, "compressed" },
+        { FA_OFFLINE, "offline" },   { FA_ENCRYPTED, "encrypted" },
+        { FA_RECALL_ON_OPEN, "recall-on-open" },
+        { FA_PINNED, "pinned" },     { FA_UNPINNED, "unpinned" },
+        { FA_RECALL_ON_DATA_ACCESS, "recall-on-access" },
+    };
+    size_t i, o = 0;
+    out[0] = '\0';
+    for (i = 0; i < sizeof t / sizeof t[0]; i++)
+        if (a & t[i].bit)
+            o += (size_t)snprintf(out + o, o < n ? n - o : 0, "%s%s",
+                                  o ? "," : "", t[i].nm);
+    if (!out[0]) snprintf(out, n, "-");
+}
+
 static void esc(const char *s)
 {
     for (; *s; s++) {
@@ -251,7 +277,6 @@ static void report(const char *path)
     struct stat st;
     uint32_t attrib = 0, tag = 0;
     int have_attrib = 0;
-    size_t i;
     char flags[256];
     const char *class;
 
@@ -261,25 +286,7 @@ static void report(const char *path)
         class = "missing";
         flags[0] = '-'; flags[1] = '\0';
     } else {
-        if (map_lookup(path, &attrib, &tag)) {
-            have_attrib = 1;
-        } else {
-            for (i = 0; i < sizeof ATTR_XATTRS / sizeof ATTR_XATTRS[0]; i++)
-                if (read_u32_xattr(path, ATTR_XATTRS[i].name,
-                                   ATTR_XATTRS[i].big_endian, &attrib)) {
-                    have_attrib = 1;
-                    break;
-                }
-            for (i = 0; i < sizeof REPARSE_XATTRS / sizeof REPARSE_XATTRS[0]; i++) {
-                unsigned char b[16];
-                ssize_t n = lgetxattr(path, REPARSE_XATTRS[i], b, sizeof b);
-                if (n >= 4) {
-                    tag = (uint32_t)b[0] | ((uint32_t)b[1] << 8) |
-                          ((uint32_t)b[2] << 16) | ((uint32_t)b[3] << 24);
-                    break;
-                }
-            }
-        }
+        have_attrib = wa_read(-1, path, &attrib, &tag);
         class = classify(&st, attrib, tag, have_attrib);
         flag_names(attrib, flags, sizeof flags);
     }
@@ -362,3 +369,4 @@ int main(int argc, char **argv)
     if (opt_json) printf("\n]\n");
     return exit_code;
 }
+#endif /* WINATTR_AS_LIBRARY */

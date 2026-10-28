@@ -24,7 +24,7 @@ HERE=$(cd "$(dirname "$0")" && pwd)
 SCRIPTS="ferry ferry-detect ferry-wifi ferry-files ferry-firefox \
 ferry-settings ferry-report ferry-hive ferry-common.sh"
 # name:source
-HELPERS="ferry-hivepeek:hivepeek.c ferry-winattr:winattr.c"
+HELPERS="ferry-hivepeek:hivepeek.c ferry-winattr:winattr.c ferry-copy:copy.c"
 
 HARDEN="-O2 -D_FORTIFY_SOURCE=3 -fstack-protector-strong \
 -fstack-clash-protection -fcf-protection=full -fPIE -pie \

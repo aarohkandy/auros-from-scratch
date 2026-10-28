@@ -10,7 +10,7 @@
 CC      ?= cc
 CFLAGS  ?= -O2 -std=gnu11 -Wall -Wextra
 BUILD   := build
-HELPERS := $(BUILD)/ferry-hivepeek $(BUILD)/ferry-winattr
+HELPERS := $(BUILD)/ferry-hivepeek $(BUILD)/ferry-winattr $(BUILD)/ferry-copy
 
 SCRIPTS := ferry ferry-detect ferry-wifi ferry-files ferry-firefox \
            ferry-settings ferry-report ferry-hive ferry-common.sh install.sh
@@ -31,6 +31,9 @@ $(BUILD)/ferry-hivepeek: hivepeek.c | $(BUILD)
 
 $(BUILD)/ferry-winattr: winattr.c | $(BUILD)
 	$(CC) $(CFLAGS) -o $@ $<
+
+$(BUILD)/ferry-copy: copy.c winattr.c | $(BUILD)
+	$(CC) $(CFLAGS) -o $@ copy.c
 
 # Every script must parse under a strict POSIX shell, not just bash.
 syntax:
