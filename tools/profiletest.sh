@@ -350,7 +350,7 @@ EOP
     # (so this part needs no network), plus Ubuntu's thunderbird stub.
     for p in desktop office; do
         for k in packages_hardware packages_boot packages_base packages_desktop \
-                 packages_files packages_apps packages_extra packages_exclude; do
+                 packages_files packages_apps packages_extra packages_security packages_exclude; do
             for n in $(pval $p $k); do echo "$n 1.0"; done
         done
     done | grep -v '^thunderbird ' | sort -u > "$T/real.idx"
