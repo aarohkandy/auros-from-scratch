@@ -7,7 +7,7 @@ Paste into Terminal on a Mac (or Linux). It puts the whole project in
 same command again any time to update it.
 
 ```sh
-D=~/Desktop/auros; R=https://github.com/ComputerDude771/auros-from-scratch.git; B=claude/brave-hypatia-x72g1m; if [ -d "$D/.git" ]; then git -C "$D" pull --ff-only; else git clone --single-branch --branch "$B" "$R" "$D"; fi; cd "$D"
+D=~/Desktop/auros; R=https://github.com/aarohkandy/auros-from-scratch.git; B=main; if [ -d "$D/.git" ]; then git -C "$D" pull --ff-only; else git clone --single-branch --branch "$B" "$R" "$D"; fi; cd "$D"
 ```
 
 - `D` is the folder (change it if you like, e.g. `D=~/Desktop/"auros v0.0.1"`).
@@ -45,7 +45,18 @@ Does not contain, by design (each is rebuilt from the folder):
    `docs/HANDOFF-RUNBOOK.md` to rebuild and publish the installer there.
 
 Nothing in the code should need editing for a move: workflows read the
-repository from GitHub (`${{ github.repository }}`), and the website and
-installer derive their download address from it at build time. If you
-find a hard-coded `ComputerDude771/auros-from-scratch` outside the docs,
-it is a bug (stream M in `docs/handoff/STREAMS.md` removes them).
+repository from GitHub (`${{ github.repository }}`), scripts ask
+`tools/repo.sh`, and the website and installer derive their download
+address from it at build time. `sh tools/portabilitytest.sh` (a step of
+`tests.yml`) fails if any file outside `docs/` names the old repository,
+except the two lines that pin `e2e.yml` and `windows.yml` to the release
+`v0.1.0-dd39389`, which exists only in the original repository; delete
+those pins when the new repository publishes its own release.
+
+**What an earlier version of this page got wrong.** It said nothing needed
+editing for a move. Until 2026-10-28 every workflow ran only on pushes to
+`claude/**` branches, so a repository whose branch is called `main` built,
+tested and published nothing. The workflows now also run on `main`
+(`build.yml`, `tests.yml`, `pages.yml`, `e2e.yml`, ...), so pushing `main`
+to the new repository works as described above. A branch with another name
+still needs adding to the `on: push: branches:` lists.
