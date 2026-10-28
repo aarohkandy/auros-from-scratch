@@ -12,6 +12,16 @@ by downloading one file.**
 <sub>Not a mock-up — a screendump of AurOS running in a VM with Secure Boot
 **enabled**, `aurshell` painting directly to DRM/KMS.</sub>
 
+> **New agent or new person? Read [`START-HERE.md`](START-HERE.md) first.**
+>
+> **Get the whole project (or update it) with one command** — see
+> [`docs/MOVING.md`](docs/MOVING.md):
+> ```sh
+> D=~/Desktop/auros; R=https://github.com/ComputerDude771/auros-from-scratch.git; B=claude/brave-hypatia-x72g1m; if [ -d "$D/.git" ]; then git -C "$D" pull --ff-only; else git clone --single-branch --branch "$B" "$R" "$D"; fi; cd "$D"
+> ```
+> Owner-only settings and secrets: [`docs/OWNER-SETUP.md`](docs/OWNER-SETUP.md).
+> Picking up the work: [`docs/handoff/RESUME-NOW.md`](docs/handoff/RESUME-NOW.md).
+
 ---
 
 ## What this is
@@ -37,9 +47,16 @@ The goal, stated as a testable contract:
 
 - **Boots with Secure Boot on.** OVMF with Microsoft's keys → Microsoft-signed
   shim → Canonical-signed GRUB → kernel → `aurshell`. The shim we ship is
-  dual-signed (Microsoft UEFI CA **2011** *and* 2023, checked with `sbverify`),
-  so it also boots firmware that predates the 2023 CA — which is most of the
-  old hardware this exists for.
+  Ubuntu's, signed by Microsoft's UEFI CA **2011** (and Canonical), checked
+  with `sbverify` by `build/shimpick`, which refuses a shim without it. That
+  is the key the old hardware this exists for trusts. It is *not* signed
+  with the 2023 CA (no Ubuntu shim is yet), so a PC whose firmware has
+  removed the 2011 key is refused by preflight instead of half-installed.
+- **Updates keep it booting.** Kernel, GRUB and shim updates install like
+  any other security update: `auros-bootchain` rewrites AurOS's own menu
+  (keeping the previous kernel as an automatic fallback) and installs a new
+  shim + GRUB only after checking this PC's firmware trusts it and its SBAT
+  level allows it. It never touches the firmware's boot order.
 - **The desktop shell runs**, painting straight to DRM/KMS. No X11, no Wayland
   compositor, no Mesa in that path.
 - **Theme engine** — one file drives wallpaper, bar, palette, terminal, TTY,

@@ -1111,6 +1111,12 @@ static int phase_prepare(const ab_choice *c, pf_report *r, ab_machine *m,
                          char *why, size_t n)
 {
     (void)r;
+    /* FAST STARTUP OFF, FIRST (R2). Before the download, the stick or
+     * anything on the drive: a machine that cannot have it switched off
+     * stops here with nothing changed. The consent page says this
+     * happens. */
+    talk(say, ud, "switching off Windows' Fast Startup");
+    if (plat_fast_startup_off(why, n) != 0) return -1;
     if (c->no_stick)
         return phase_prepare_nostick(c, m, say, prog, ud, why, n);
     if (find_stick(c, m, why, n) != 0) return -1;
@@ -1434,6 +1440,66 @@ static void write_choices(const ab_choice *c, const char *esp,
 
 /* ── phase 3: the last thing before the restart ──────────────────── */
 
+/* ROOM ON THE EFI PARTITION, ASKED BEFORE THE FIRST BYTE GOES THERE.
+ * Preflight asked already, but of a number; this asks of the files about
+ * to be copied and the partition as it is now. A copy that runs out of
+ * room half way leaves a kernel with no initramfs beside it and a boot
+ * entry that is never armed -- harmless, since nothing else has changed,
+ * but a refusal with the sizes in it is what a person can act on.
+ *
+ * Files a previous attempt left under \\EFI\\AurOS are replaced, so their
+ * bytes count as room. plat_file_copy overwrites in place (CopyFileW,
+ * not a copy beside and a rename), so nothing has to fit on top. */
+static int esp_room(const char *esp, const char *kern, const char *init,
+                    char *why, size_t n)
+{
+    static const char *mine[] = { "staging.efi", "staging.img", "shimx64.efi",
+                                  "grubx64.efi", "mmx64.efi", "grub.cfg",
+                                  "choices.conf" };
+    static const char *extra[] = { PAYLOAD_SHIM, PAYLOAD_GRUB, PAYLOAD_MOKMGR };
+    uint64_t want = 0, sz = 0, old = 0;
+    char p[512], w2[PLAT_WHY];
+    const char *have[2] = { kern, init };
+    for (int i = 0; i < 2; i++) {
+        sz = 0;
+        if (plat_file_size(have[i], &sz) != 0) {
+            snprintf(why, n, "the part of the installer that starts your "
+                             "computer could not be measured.");
+            return -1;
+        }
+        want += sz;
+    }
+    for (size_t i = 0; i < sizeof extra / sizeof extra[0]; i++) {
+        sz = 0;
+        if (plat_payload(extra[i], p, sizeof p, w2, sizeof w2) == 0 &&
+            plat_file_size(p, &sz) == 0) {
+            want += sz;
+        }
+    }
+    want += 1ULL << 20;                 /* grub.cfg, choices, FAT clusters */
+    for (size_t i = 0; i < sizeof mine / sizeof mine[0]; i++) {
+        snprintf(p, sizeof p, "%s/EFI/AurOS/%s", esp, mine[i]);
+        sz = 0;
+        if (plat_file_size(p, &sz) == 0) old += sz;
+    }
+    snprintf(p, sizeof p, "%s/EFI", esp);
+    uint64_t free_now = plat_free_space(p);
+    /* ZERO IS AN ANSWER. It used to mean "could not be asked" and let
+     * the copy go ahead, which on a partition that really is full is
+     * the half-written copy this function exists to prevent. Either
+     * way nothing has been written yet, so refusing costs nothing. */
+    if (free_now + old < want) {
+        snprintf(why, n,
+                 "the start-up partition does not have room for what AurOS "
+                 "starts from: it needs %llu MB there and has %llu MB free, or "
+                 "could not say. Nothing has been changed.",
+                 (unsigned long long)((want + MIB - 1) / MIB),
+                 (unsigned long long)(free_now / MIB));
+        return -1;
+    }
+    return 0;
+}
+
 static int phase_handoff(const ab_choice *c, pf_report *r, ab_machine *m,
                          ab_say say, void *ud, char *why, size_t n)
 {
@@ -1460,6 +1526,12 @@ static int phase_handoff(const ab_choice *c, pf_report *r, ab_machine *m,
     char esp[256];
     if (plat_esp_open(esp, sizeof esp, why, n) != 0)
         { plat_payload_free(); return -1; }
+
+    if (esp_room(esp, kern, init, why, n) != 0) {
+        plat_esp_close();
+        plat_payload_free();
+        return -1;
+    }
 
     char dst[512];
     snprintf(dst, sizeof dst, "%s/EFI/AurOS/staging.efi", esp);
@@ -1583,13 +1655,25 @@ static int phase_handoff(const ab_choice *c, pf_report *r, ab_machine *m,
             plat_file_read(ucfg, 0, back, 11, w2, sizeof w2) == 0 &&
             memcmp(back, "# AurBridge", 11) == 0)
             plat_file_delete(ucfg, w2, sizeof w2);
-        char cfg[1024];
+        char cfg[2048];
         int cl = snprintf(cfg, sizeof cfg,
             "# AurBridge: starts the AurOS installer, once. Written by the\n"
             "# AurOS installer, and safe to delete once AurOS is installed.\n"
             "set timeout=0\n"
             "set default=0\n"
-            "search --no-floppy --file --set=root /EFI/AurOS/staging.efi\n"
+            /* THE PARTITION GRUB WAS STARTED FROM, which is this one:
+             * $cmdpath is "(hd0,gpt1)/EFI/AurOS". A search by file name
+             * alone would take the first partition with an old
+             * \EFI\AurOS\staging.efi on it -- a second EFI partition, a
+             * second disk -- and the journal check would then refuse,
+             * safely, on the wrong machine's copy. The search stays as
+             * the fallback for a grub without regexp. */
+            "if regexp --set=1:aurdev '^\\((.*)\\)' \"$cmdpath\"; then\n"
+            "    set root=\"$aurdev\"\n"
+            "fi\n"
+            "if [ ! -f /EFI/AurOS/staging.efi ]; then\n"
+            "    search --no-floppy --file --set=root /EFI/AurOS/staging.efi\n"
+            "fi\n"
             "menuentry 'AurOS installer' {\n"
             "    linux /EFI/AurOS/staging.efi aurstage.install "
             "aurstage.profile=%s console=tty0%s%s\n"

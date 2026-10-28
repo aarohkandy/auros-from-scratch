@@ -35,7 +35,11 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PROFILE="${1:-desktop}"
 RFS="$ROOT/work/forge/$PROFILE/rootfs"
-OUT="$ROOT/out"
+# AUROS_STAGING_OUT: somewhere else to put it. tools/nvramtest.sh
+# builds this to prove its gate fires; doing that into out/ rewrote the
+# staging image the end-to-end tests had just tested (new mtimes, new
+# bytes) -- and the installer embeds whatever is in out/.
+OUT="${AUROS_STAGING_OUT:-$ROOT/out}"
 # A fault-injection image never overwrites the real one.
 SUF=""
 [ "${AURSTAGE_FAULT:-0}" = 1 ] && SUF="-fault"
@@ -326,6 +330,30 @@ fi
 unset FLAGS
 note "init $(du -h init | cut -f1)"
 
+# ── the screen ─────────────────────────────────────────────────────
+#
+# src/aurscreen: the progress screen PID 1 feeds through a pipe
+# (docs/issues/v3/05, 5.5). Static for the same reason as init, and
+# outside src/aurstage so the write gate above keeps covering every
+# file in that directory without an exception. It needs the kernel's
+# simpledrm (built in on Ubuntu's kernel: the firmware's own
+# framebuffer, no GPU driver) and two fonts; without either it exits
+# and the console text is what is left, as before.
+mkdir -p usr/bin usr/share/fonts/truetype/dejavu
+gcc -O2 -std=gnu11 -Wall -Wextra -static -o usr/bin/aurscreen \
+    "$ROOT/src/aurscreen/screen.c" "$ROOT/src/aurshell/kms.c" \
+    "$ROOT/src/aurshell/draw.c" "$ROOT/src/common/font.c" "$ROOT/src/common/png.c" -lm \
+    || die "aurscreen did not build"
+case "$(file usr/bin/aurscreen 2>/dev/null || true)" in
+  *"statically linked"*) ;;
+  *) die "aurscreen is not statically linked" ;;
+esac
+for f in DejaVuSans.ttf DejaVuSans-Bold.ttf; do
+    cp "$RFS/usr/share/fonts/truetype/dejavu/$f" usr/share/fonts/truetype/dejavu/ \
+        || die "no $f in $RFS for the staging screen"
+done
+note "aurscreen $(du -h usr/bin/aurscreen | cut -f1), with DejaVu Sans"
+
 # ── the programs it shells out to ──────────────────────────────────
 #
 # Each is here because writing our own would be worse:
@@ -479,6 +507,11 @@ note "$n_lib libraries"
 # it; a module that is only ever loaded on purpose is not mounted by
 # accident.
 #
+# mmc is in it because preflight accepts an eMMC system disk as the PC's
+# own drive (32/64 GB budget laptops): without mmc_block and the sdhci
+# host drivers the staging environment would see no disk at all on the
+# machine it was told it could install on, after the restart.
+#
 # VMD is in this list for a specific reason: on Intel RST machines the
 # disk is invisible without it, and "this computer has no disk" is the
 # worst possible thing to tell somebody about a computer they are
@@ -493,6 +526,7 @@ kernel/drivers/usb/host
 kernel/drivers/usb/common
 kernel/drivers/block
 kernel/drivers/pci/controller
+kernel/drivers/mmc
 kernel/drivers/virtio
 kernel/fs/ext4
 kernel/fs/fat
@@ -521,6 +555,15 @@ done
     "$RFS/usr/sbin/depmod" -b "$WORK" "$KVER" \
     || die "depmod failed; modprobe would find nothing and no disk would appear"
 note "$(find lib/modules -name '*.ko*' | wc -l) modules, $(du -sh lib/modules | cut -f1)"
+# THE DRIVERS PREFLIGHT PROMISES, checked by name. A directory that moved
+# in a new kernel package is a directory this loop silently skips, and
+# the machine it was skipped for is told after the restart that it has
+# no disk.
+for need in nvme ahci mmc_block sdhci-pci vmd; do
+    find "lib/modules/$KVER" -name "$need.ko*" | grep -q . \
+        || die "the staging environment has no $need driver; a PC preflight
+     accepts would show no disk after the restart"
+done
 
 # ── the archive ────────────────────────────────────────────────────
 step "packing"
@@ -539,10 +582,9 @@ cp -a "$RFS/boot/vmlinuz-$KVER" "$OUT/auros-staging$SUF-vmlinuz"
 # build/mkimage copies for the installed system -- and carries them in
 # the installer beside the kernel. Taken from the image, never rebuilt:
 # their signatures are the whole point of them.
-SHIM_SRC=""
-for c in shimx64.efi.dualsigned shimx64.efi.signed.latest shimx64.efi.signed; do
-    [ -f "$RFS/usr/lib/shim/$c" ] && { SHIM_SRC="$RFS/usr/lib/shim/$c"; break; }
-done
+# The same choice as build/mkimage, by the same program: one rule for
+# which shim is good enough, refused rather than fallen back from.
+SHIM_SRC=$("$ROOT/build/shimpick" "$RFS") || die "no shim the installer can carry"
 GRUB_SRC="$RFS/usr/lib/grub/x86_64-efi-signed/grubx64.efi.signed"
 [ -n "$SHIM_SRC" ] && [ -f "$GRUB_SRC" ] \
     || die "no signed shim and grub in $RFS; the installer could not start

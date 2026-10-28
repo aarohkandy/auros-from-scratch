@@ -9,6 +9,60 @@ in git: a fresh checkout has to rebuild it.
 
 ---
 
+## On GitHub Actions: how it is done now (2026-10-23)
+
+Images, tests and releases are made by three workflows on GitHub's
+`ubuntu-24.04` runners, which have KVM and an open network (this
+container has neither: its images had no Firefox and its QEMU tests ran
+under TCG). `docs/RELEASE.md` "How a release is made" has the detail;
+the short version, **trigger words in the commit subject only**:
+
+The words count **only in the commit subject** (the first line); a body
+that mentions them does nothing.
+
+| Subject contains | What happens |
+|---|---|
+| `[build]` (or any change to `build/ src/ rootfs/ profiles/ themes/ shells/` or the workflows) | build + every test |
+| `[test]` | the tests only, against the newest build of the branch with artifacts left (14 days) |
+| `[release]` | build + tests, then a **prerelease** `v<os_version>-<sha7>` if every test passed |
+| `[publish]` / `[publish RUN-ID]` | a **prerelease** of the newest build that passed every test (or of that run); nothing rebuilt |
+| `[publish] [latest]` / `[publish RUN-ID] [latest]` | the same, then **promoted** to the full, latest release (what the website's link serves) -- only if a passing `e2e.yml` run pinned that `AurOS-Setup.exe`'s SHA-256 |
+
+```sh
+git commit --allow-empty -m "[publish] the newest green build, as a prerelease"
+git commit --allow-empty -m "[publish 39893191009] [latest] that build, as the release"
+```
+
+A flaky test: re-run the build run's failed jobs (run page, "Re-run
+failed jobs", or the GitHub tools' `rerun_failed_jobs`), then
+`[publish RUN-ID]`; the jobs API reports each job's latest attempt.
+
+What each job is, and what to read when it fails:
+
+| Workflow / job | Proves | Read |
+|---|---|---|
+| `build / build` | the desktop image builds from Ubuntu's archive and Mozilla's Firefox, the staging environment builds, the installer carries both and the release address, and the pieces unpack to the image through the installer's own code | the job log; artifact `auros-installer` has `build-warnings`, `timings.txt`, `build-info.txt` |
+| `build / tests / unit` | the fast suites, Ferry, `aurbridge.exe selftest` under Wine | `transcripts-unit` |
+| `build / tests / e2e (NAME)` | that end-to-end test, under KVM | `transcripts-NAME` |
+| `release / publish` | the prerelease exists and reads back byte for byte through GitHub's 302, with `Range` | the job log |
+| `release / windows` | the published AurOS-Setup.exe starts on real Windows; WinHTTP fetches the image from the release | the job log |
+| `release / promote` | (`[latest]` only) a passing `e2e.yml` run installed this AurOS-Setup.exe on a real Windows 11 VM; then the release is made the latest and `releases/latest/download/AurOS-Setup.exe` is checked | the job log |
+
+**Artifacts cannot be downloaded into this container** (the storage host
+is blocked); job logs can, through the GitHub tools, and so can release
+assets. To inspect a file from a run, publish it (`[publish RUN-ID]`)
+and download it from the release.
+
+The end-to-end scripts are unchanged for Actions: `tests.yml` puts a
+`qemu-system-x86_64` in `/usr/local/bin` that rewrites `accel=tcg` to
+`accel=kvm` (or `$AUROS_QEMU_ACCEL`) and runs the real one; sudo's
+`secure_path` finds it first too.
+
+Everything below is the by-hand route this container used, kept because
+it is still how to reproduce a step locally.
+
+---
+
 ## Build order
 
 ```sh
@@ -71,6 +125,25 @@ and `mv` it over; the running shell keeps the old file open.
 | `out/aurbridge-sim sbselftest` | Secure Boot db logic | instant | |
 | `out/aurbridge-sim gzselftest` | inflater | instant | |
 | `WINEDEBUG=-all wine out/aurbridge.exe selftest` | preflight + inflate + sbdb | seconds | |
+| `sh tools/manifesttest.sh out/aurbridge-wizard.exe` | 10 | seconds | mingw, python3 |
+| `sh tools/putbacktest.sh` | 16 | about 20 min (three desktop boots under TCG) | `out/auros-desktop.img`, staging, `OVMF_*_4M.ms.fd` |
+| `sh tools/firstboottest.sh desktop` | cases A, B, C | about 40 min | `out/auros-desktop.img` |
+| `sh tools/bootchaintest.sh` | 72 | under a minute | a forged rootfs (`work/forge/desktop/rootfs`), OVMF, osslsigncode, sbsigntool, losetup |
+| `sh tools/bootupdatetest.sh` | 27 | about 8 min (three desktop boots) | `out/auros-desktop.img`, `OVMF_*_4M.ms.fd`, network for `apt-get download` |
+| `sh tools/screentest.sh [SERIAL-LOG]` | 24 (+1 with a log) | seconds | gcc |
+| `AUROS_SHOTS=DIR sh tools/installtest.sh` | 37 | as installtest | also keeps a screenshot every 15 s and each run's serial log in DIR |
+
+**Real Windows: `.github/workflows/windows.yml`, on every push to a
+`claude/**` branch.** Wine is not Windows (docs/handoff/TRAPS.md): the
+first real PC refused an installer every test here had passed. The
+workflow builds the `.exe` files, starts them on a GitHub Actions
+Windows VM, downloads the published installer and starts that, and
+downloads the published image with the installer's own WinHTTP code.
+Its `PUBLISHED_SHA256` and `IMAGE_*` variables are changed in the same
+commit that publishes a new installer or image. Read results with the
+GitHub tools (`actions_list`, `get_job_logs`); the repository is public,
+so `curl https://api.github.com/repos/ComputerDude771/auros-from-scratch/actions/runs`
+also works without a token.
 
 `tools/README.md` lists every other test. Saved transcripts live in
 `docs/results/`, with an index in `docs/results/README.md`; after a run,
@@ -128,8 +201,9 @@ path has run only in the simulation.
 
 ---
 
-## Publishing the image in pieces
+## Publishing the image in pieces (by hand, the older route)
 
+`release.yml` does this now, as release assets instead of a branch.
 What was done for v2 (the gzip header says `-9`):
 
 ```sh
@@ -163,9 +237,11 @@ scratch directory. A new container has none; `git fetch origin
 image-desktop` followed by `git worktree add ../imgwt image-desktop`
 recreates it, at the cost of downloading every piece.
 
-## Publishing the test installer
+## Publishing the test installer (by hand, the older route)
 
-Replace `AurOS-Installer-test.exe` at the top of `image-desktop`,
+`release.yml` publishes `AurOS-Setup.exe` as a release asset now; the
+website links to `releases/latest/download/AurOS-Setup.exe`. By hand:
+replace `AurOS-Installer-test.exe` at the top of `image-desktop`,
 update the table in that branch's `README.md` (SHA-256, source commit,
 test counts), commit, push, then re-download it and compare:
 

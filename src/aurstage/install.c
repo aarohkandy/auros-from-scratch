@@ -134,11 +134,19 @@ static void step(rec_step s, const char *note)
 static void dots(int pct)
 {
     static int last = -1;
+    stage_progress(pct);
     if (pct == last || pct % 5) return;
     last = pct;
     fprintf(stderr, " %d%%", pct);
     if (pct >= 100) fprintf(stderr, "\n");
 }
+
+/* surface_test() reports (done, total); the screen wants a percentage.
+ * The audit found this step was called with progress=NULL, so a ~3-hour
+ * read of a failing hard disk looked frozen and the person switched the
+ * machine off -- the one thing they must not do mid-install. */
+static void surf_dots(uint64_t done, uint64_t total)
+{ dots(total ? (int)(done * 100 / total) : 0); }
 
 /* The same bar, with a fault point in it.
  *
@@ -522,12 +530,28 @@ void install_run(const stage_machine *m)
     if (!sp.ok)
         refuse(sp.why, NULL, "cannot-measure");
 
-    /* The surface of the space that would be reclaimed. R5. */
+    /* HOW SMALL TO MAKE IT -- only what AurOS needs, not the floor.
+     * See pick_win_target(). The install need is min_root plus the two
+     * small partitions, with a little slack for megabyte alignment. */
+    uint64_t install_need = min_root_bytes() + boot_need + rsc_need + 4 * 1024 * 1024;
+    uint64_t win_target = shrink_pick_target(sp.current_bytes, sp.smallest_bytes,
+                                             install_need);
+    stage_say("Windows is %.1f GiB; it will be made %.1f GiB, freeing %.1f GiB "
+              "for AurOS",
+              (double)sp.current_bytes / (1024.0*1024*1024),
+              (double)win_target       / (1024.0*1024*1024),
+              (double)(sp.current_bytes - win_target) / (1024.0*1024*1024));
+
+    /* The surface of the space that would be reclaimed. R5. Only the
+     * region actually being freed -- [win_target, current] -- not every
+     * free byte up to ntfsresize's floor, which on a terabyte disk is
+     * hours of reading. With a real progress callback, because without
+     * one the screen sat frozen through it. */
     stage_say("reading every sector of the space that would be reclaimed");
     fprintf(stderr, "aurstage: ");
     uint64_t bad = 0;
-    if (surface_test(windev, sp.smallest_bytes, sp.current_bytes,
-                     (uint32_t)disk->logical_sector, &bad, NULL) != 0) {
+    if (surface_test(windev, win_target, sp.current_bytes,
+                     (uint32_t)disk->logical_sector, &bad, surf_dots) != 0) {
         snprintf(why, sizeof why,
                  "This disk could not read the space %llu MB into the Windows "
                  "drive. The drive is failing.",
@@ -537,9 +561,12 @@ void install_run(const stage_machine *m)
     }
     fprintf(stderr, "\n");
 
-    /* A layout that fits, checked against the table. */
+    /* A layout that fits, checked against the table. plan_compute works
+     * in the whole gap -- the space freed here plus any already
+     * unallocated after Windows -- so it remains the authority on
+     * whether there is room. */
     stage_layout L;
-    if (plan_compute(&old, wi, sp.smallest_bytes, img.root_len,
+    if (plan_compute(&old, wi, win_target, img.root_len,
                      boot_need, rsc_need, min_root_bytes(), &L,
                      why, sizeof why) != 0)
         refuse(why, NULL, "no-room");
@@ -577,7 +604,7 @@ void install_run(const stage_machine *m)
     fault_maybe("shrink-begin");
     fprintf(stderr, "aurstage: ");
     shrink_result sr;
-    shrink_do(windev, sp.smallest_bytes, dots, &sr);
+    shrink_do(windev, win_target, dots, &sr);
     if (!sr.ok) {
         if (!sr.started)
             give_up(sr.why, "Nothing on the Windows drive was touched.",
@@ -680,8 +707,22 @@ void install_run(const stage_machine *m)
     char rootdev[80];
     probe_result pr;
     probe_run_at(diskdev, root_off, &pr);
-    if (pr.verdict != PROBE_OK)
-        give_up(pr.why, pr.remedy, probe_verdict_name(pr.verdict), 1);
+    if (pr.verdict != PROBE_OK) {
+        /* NOT pr.remedy. probe.c's sentences are written for the dry
+         * run, where "Nothing has been changed" is true. Here Windows
+         * has already been made smaller (phase 5), so that sentence
+         * would be false at the one moment she most needs to believe
+         * the screen -- and "a fault in the AurOS memory stick" is
+         * about a stick the published installer does not use. Found
+         * by the website review on 2026-10-04. */
+        give_up(pr.why,
+                pr.verdict == PROBE_NO_NETWORK
+                  ? "The Windows drive is smaller but still works. Plug in "
+                    "a network cable and try again, or send us the support file."
+                  : "The Windows drive is smaller but still works. This is a "
+                    "fault in AurOS, not in this computer.",
+                probe_verdict_name(pr.verdict), 1);
+    }
     stage_say("checks   %s", pr.why);
     step(REC_PROBE_END, pr.why);
 
@@ -828,9 +869,14 @@ void install_run(const stage_machine *m)
  * here and nothing below the line to warn about. */
 static void stop_restore(void)
 {
+    /* NOT "WITH THE MEMORY STICK PLUGGED IN". The installer people
+     * actually have installs without one, and "Put Windows back" is now
+     * started from AurOS's own menu; telling somebody to fetch a stick
+     * they were never given is a dead end on the one screen that has to
+     * say what to do next. */
     stage_say("%s", "");
-    stage_say("Turn this computer off with the power button, and start it");
-    stage_say("again with the AurOS memory stick plugged in.");
+    stage_say("Turn this computer off with the power button, then on again.");
+    stage_say("If you have an AurOS memory stick, plug it in first.");
     sync();
     for (;;) pause();
 }
@@ -866,7 +912,8 @@ void restore_run(const stage_machine *m)
         stage_warn("there is no saved copy of this computer's Windows "
                    "startup, on this computer or on any drive plugged "
                    "into it.");
-        stage_say("         Plug in the AurOS memory stick and try again.");
+        stage_say("         Nothing has been changed. If you have an AurOS "
+                  "memory stick, plug it in and try again.");
         stage_say("aurstage-report v1 verdict=restore-nothing-saved "
                   "record=none -");
         stop_restore();
@@ -971,7 +1018,8 @@ void restore_run(const stage_machine *m)
               oc.volumes_grown, oc.volumes_left_small, oc.mbr_restored);
     stage_say("%s", "");
     stage_say("Windows is back. This computer will switch itself off;");
-    stage_say("take the memory stick out and start it again.");
+    stage_say("switch it on again and Windows starts. If an AurOS memory");
+    stage_say("stick is plugged in, take it out first.");
     sync();
     reboot(RB_POWER_OFF);
     for (;;) pause();
