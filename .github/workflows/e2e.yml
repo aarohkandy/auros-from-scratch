@@ -22,7 +22,7 @@ name: e2e
 
 on:
   push:
-    branches: ['claude/**']
+    branches: ['claude/**', 'main']
 
 permissions:
   contents: write
@@ -32,8 +32,8 @@ env:
   # To test a fresh build instead, set INSTALLER_PATH to the file on the
   # runner (an artifact from an earlier job); the website's links are
   # then pointed at it, served from the runner.
-  INSTALLER_URL: https://github.com/${{ github.repository }}/raw/image-desktop/AurOS-Installer-test.exe
-  INSTALLER_SHA256: ef903efd9cdeb10e15e52b3ce9e4eac83788f3396ac9f029ed04f2cfca1c5891
+  INSTALLER_URL: https://github.com/ComputerDude771/auros-from-scratch/releases/download/v0.1.0-dd39389/AurOS-Setup.exe
+  INSTALLER_SHA256: 89b49e4bb7538abf56fee31399b4f71f74d1fa5f245484bed9e317e1a8a02a3d
   INSTALLER_PATH: ''
   WEBSITE_DIR: website
   # Windows: Microsoft's evaluation-center link; pinned hash once known.

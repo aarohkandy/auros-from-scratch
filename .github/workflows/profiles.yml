@@ -31,7 +31,7 @@ name: profiles
 
 on:
   push:
-    branches: ['claude/**']
+    branches: ['claude/**', 'main']
 
 permissions:
   contents: write

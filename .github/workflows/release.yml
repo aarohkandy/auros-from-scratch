@@ -44,7 +44,7 @@ name: release
 
 on:
   push:
-    branches: ['claude/**']
+    branches: ['claude/**', 'main']
   workflow_call:
     inputs:
       run-id:

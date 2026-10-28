@@ -15,7 +15,7 @@ name: othersys
 
 on:
   push:
-    branches: ['claude/**']
+    branches: ['claude/**', 'main']
   workflow_dispatch:
 
 permissions:

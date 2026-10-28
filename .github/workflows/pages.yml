@@ -26,7 +26,7 @@ name: pages
 
 on:
   push:
-    branches: ['claude/brave-hypatia-x72g1m']
+    branches: ['claude/brave-hypatia-x72g1m', 'main']
     paths:
       - 'website/**'
       - 'tools/site/**'

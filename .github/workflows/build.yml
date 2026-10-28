@@ -29,7 +29,7 @@ name: build
 
 on:
   push:
-    branches: ['claude/**']
+    branches: ['claude/**', 'main']
 
 permissions:
   contents: read

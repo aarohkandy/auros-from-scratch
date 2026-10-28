@@ -20,21 +20,21 @@ name: windows
 
 on:
   push:
-    branches: ['claude/**']
+    branches: ['claude/**', 'main']
   workflow_dispatch:
 
 env:
   # The installer published on branch image-desktop. Change both lines
   # together when a new one is published.
-  PUBLISHED_URL: https://raw.githubusercontent.com/${{ github.repository }}/image-desktop/AurOS-Installer-test.exe
-  PUBLISHED_SHA256: ef903efd9cdeb10e15e52b3ce9e4eac83788f3396ac9f029ed04f2cfca1c5891
+  PUBLISHED_URL: https://github.com/ComputerDude771/auros-from-scratch/releases/download/v0.1.0-dd39389/AurOS-Setup.exe
+  PUBLISHED_SHA256: 89b49e4bb7538abf56fee31399b4f71f74d1fa5f245484bed9e317e1a8a02a3d
   KNOWN_BAD_URL: https://raw.githubusercontent.com/${{ github.repository }}/d2735b6b775b1952c724aabdfdf2567246ab6c74/AurOS-Installer-test.exe
   KNOWN_BAD_SHA256: 3e32e929f57c5c2673f4547a09b44c827743d191120d22a57dfc6f28a4f3e875
   # The image the published installer downloads: its piece list, and
   # what the whole image must hash to. Change with the installer.
-  IMAGE_PIECES_URL: https://raw.githubusercontent.com/${{ github.repository }}/image-desktop/v4/pieces.txt
-  IMAGE_SHA256: b36100653b1b3dd339c6209cdd60ab169706717f512f2bb5dee0273dd404da41
-  IMAGE_BYTES: 5333057536
+  IMAGE_PIECES_URL: https://github.com/ComputerDude771/auros-from-scratch/releases/download/v0.1.0-dd39389/pieces.txt
+  IMAGE_SHA256: 9e3e7b9d461f2bbd1095f5cb8a82a5b07f77cdef449145fca65c51d0b7acce52
+  IMAGE_BYTES: 4855955456
 
 # One run at a time per branch. A push while one runs queues the newest
 # and drops older queued ones (GitHub keeps one pending run per group), so

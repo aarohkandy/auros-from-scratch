@@ -444,21 +444,52 @@ class Flow:
                     warn = re.search(r"(isn.t commonly downloaded|can.t be downloaded securely|"
                                      r"might be dangerous|download blocked|was blocked|unsafe|"
                                      r"couldn.t verify)", names, re.I)
-                    more = self.pick(els, r"^(More actions|See more|More options)", ("Button", "SplitButton", "MenuItem"))
-                    if warn and more and pressed.count("more") < 4:
+                    # The warning item's own "..." (More actions) exists only
+                    # while the pointer is on the item, and sits inside the
+                    # item's row. The panel header's "More options" (Open
+                    # downloads page / Clear all download history) is a
+                    # different button one row up; matching it here is how
+                    # every run opened the wrong menu four times and then
+                    # waited out the deadline (e2e-39899282173, every variant).
+                    item = None
+                    if warn:
+                        for kind in ("ListItem", "Text"):
+                            item = next((e for e in els if e.get("type") == kind and
+                                         re.search(warn.group(1), e.get("name") or "", re.I)), None)
+                            if item:
+                                break
+                    more = None
+                    if item:
+                        _, iy, _, ih = item["rect"]
+                        for e in els:
+                            if e.get("type") not in ("Button", "SplitButton", "MenuItem"):
+                                continue
+                            if not re.search(r"^(More actions|See more)", e.get("name") or "", re.I):
+                                continue
+                            x, y, w, h = e["rect"]
+                            if iy <= y + h // 2 <= iy + ih:
+                                more = e
+                                break
+                    if more and pressed.count("more") < 4:
                         self.click_el(more, "edge download item: more actions")
                         pressed.append("more")
                         time.sleep(3)
                         continue
-                    if warn and not more:
-                        # Edge shows an item's buttons when the pointer is on it
-                        item = next((e for e in els if e.get("type") in ("ListItem", "Text", "Button") and
-                                     re.search(warn.group(1), e.get("name") or "", re.I)), None)
-                        if item and pressed.count("hover") < 6:
-                            x, y, w, h = item["rect"]
-                            self.m.move(x + w // 2, y + h // 2)
+                    if item and not more:
+                        x, y, w, h = item["rect"]
+                        if pressed.count("hover") < 4:
+                            # Edge shows an item's buttons when the pointer is on it
+                            self.m.move(x + w - 28, y + h // 2)
                             pressed.append("hover")
                             time.sleep(2)
+                            continue
+                        if pressed.count("blind") < 3:
+                            # it never reached the accessibility tree; it is
+                            # drawn at the row's right end, so press there
+                            self.m.click(x + w - 28, y + h // 2,
+                                         label="edge download item: its dots, by position")
+                            pressed.append("blind")
+                            time.sleep(3)
                             continue
                     if not warn and pressed.count("flyout") < 3:
                         # the flyout went away: the toolbar's Downloads button
