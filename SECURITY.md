@@ -9,7 +9,7 @@ public.
 ## How to report
 
 **Use GitHub's private reporting:** open
-<https://github.com/ComputerDude771/auros-from-scratch/security/advisories/new>
+[the private reporting form](../../security/advisories/new)
 (or the repository's **Security** tab, then **Report a vulnerability**).
 Only the maintainers can see what you write there.
 
@@ -83,7 +83,7 @@ legal action against you for your research.
 ## Supported versions
 
 Only the newest release (marked "Latest" on the
-[releases page](https://github.com/ComputerDude771/auros-from-scratch/releases))
+[releases page](../../releases))
 and the AurOS systems installed from it, kept up to date through
 AurOS's update channel, receive security fixes. Pre-releases are for
 testing and are not supported.

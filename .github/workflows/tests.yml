@@ -7,7 +7,7 @@
 # again. (workflow_dispatch would be the obvious way, and it only works
 # for workflows on the default branch.)
 #
-#   unit   the fast suites: aurfirsttest, choicestest (with the image's
+#   unit   the fast suites: portabilitytest, aurfirsttest, choicestest (with the image's
 #          aurshell), nmtest, sessionenvtest, looktest, storetest,
 #          shrinktargettest, probetest, nvramtest, bridgetest,
 #          manifesttest, signtest, Ferry's, and the console installer's
@@ -125,6 +125,9 @@ jobs:
           fi
           sudo test -d work/staging/lib/modules
           cat dl/installer/build-info.txt
+      - name: portabilitytest (no file outside docs/ names the old repository)
+        if: ${{ !cancelled() }}
+        run: sh tools/portabilitytest.sh 2>&1 | tee transcripts/portabilitytest.txt
       - name: aurfirsttest
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: sh tools/aurfirsttest.sh 2>&1 | tee transcripts/aurfirsttest.txt

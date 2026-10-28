@@ -96,9 +96,10 @@ what to ask for if anything stops.
 ## Published right now
 
 See the `image-desktop` branch's README for the hashes. The link people
-are given:
+are given (OWNER/REPO is the repository the branch lives in: `sh tools/repo.sh`;
+the pinned files exist only in the repository they were published to):
 
-https://github.com/ComputerDude771/auros-from-scratch/raw/image-desktop/AurOS-Installer-test.exe
+https://github.com/OWNER/REPO/raw/image-desktop/AurOS-Installer-test.exe
 
 Right now: installer `ef903efd` (built from `8593f7f`), which downloads
 the v4 image `b3610065` (5,333,057,536 bytes) from `image-desktop/v4/`.
@@ -118,7 +119,7 @@ change them in the same commit as the files.
   not, and a link.
 - **Every time a fix is published, end the reply with the download link
   and the new SHA-256**, even when they did not ask:
-  https://github.com/ComputerDude771/auros-from-scratch/raw/image-desktop/AurOS-Installer-test.exe
+  https://github.com/OWNER/REPO/raw/image-desktop/AurOS-Installer-test.exe
   If nothing new was published, say so and give the link to what is there.
 - **Spending credits is fine; raising the credit limit is not.**
 - **The installer fixes problems, it does not describe them** (2026-09-29).

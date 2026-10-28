@@ -76,8 +76,8 @@ that people will pay for it.
 
 ## 4. Your environment, and what you need
 
-- **Git**: branch `claude/brave-hypatia-x72g1m` (PR
-  https://github.com/ComputerDude771/auros-from-scratch/pull/1 tracks it). Push
+- **Git**: branch `claude/brave-hypatia-x72g1m` (the pull request on the
+  original repository tracks it). Push
   with `git fetch && git rebase origin/<branch> && git push origin HEAD:<branch>`;
   never another branch; commit trailers per `docs/handoff/STREAMS.md` rule 5
   (if your harness gives different attribution lines, use those).
