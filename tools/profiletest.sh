@@ -135,7 +135,7 @@ lint_one() { # profile-name-or-path [index-file]
     # Every list stage 2 hands to one `apt-get install`.
     names="locales"
     for k in packages_hardware packages_boot packages_base packages_desktop \
-             packages_files packages_apps packages_extra; do
+             packages_files packages_apps packages_extra packages_security; do
         names="$names $(pval "$p" $k)"
     done
     missing=""; stubs=""
@@ -420,6 +420,8 @@ PROFILETEST locales=C.utf8 en_US.utf8 POSIX
 PROFILETEST browser=/usr/bin/firefox
 PROFILETEST failed=
 PROFILETEST tty2=masked
+PROFILETEST swap=/dev/zram0;partition;1.9G;
+PROFILETEST earlyoom=active
 PROFILETEST done
 EOR
     }
@@ -447,6 +449,8 @@ EOR
     rep "...with no browser"                  's/browser=.*/browser=/'
     rep "...with a console on Ctrl-Alt-F2"    's/tty2=masked/tty2=enabled/'
     rep "...with aurshell crashed"            's/aurshell=active/aurshell=failed/'
+    rep "...with no compressed swap"          's/^PROFILETEST swap=.*/PROFILETEST swap=/'
+    rep "...with earlyoom not running"        's/earlyoom=active/earlyoom=inactive/'
     good | sed 's/locales=.*/locales=C.utf8 POSIX/' > "$T/r.bad"
     b=$( fail=0; checked=0; judge_report school-kiosk "$T/r.bad" >/dev/null; echo "$fail" )
     if [ "$b" -ge 1 ]; then printf '    %-62s %s\n' "...with its language never generated" "refused"
