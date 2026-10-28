@@ -41,6 +41,7 @@
 #define MAX_PATH   200000       /* flattened points per glyph */
 #define MAX_DIM    4096         /* glyph bitmap edge, px */
 #define MAX_DEPTH  6            /* composite nesting */
+#define MAX_COMPONENTS 256      /* components visited drawing ONE glyph, nested or not */
 #define MAX_FD     256          /* CID-keyed CFF font dicts */
 
 /* ── bounds-checked big-endian reader ─────────────────────────────
@@ -206,6 +207,7 @@ typedef struct {
     int  *end; int ne, ecap;   /* one-past-last index of each contour */
     int   start;               /* first point of the contour in progress */
     int   oom;
+    int   comps;               /* composite components visited so far */
 } outline;
 
 static int ol_add(outline *P, float x, float y)
@@ -914,6 +916,13 @@ static void composite_glyph(font *f, rd *r, outline *P, xform t, int depth)
     int guard = 0;
     do {
         if (++guard > 64) return;              /* runaway component list */
+        /* The 64 above is per list, and a list may name itself: 64
+         * components nested MAX_DEPTH deep is 64^6 visits to draw one
+         * letter, and a component with no points never trips the
+         * outline size limit. One budget for the whole glyph, however
+         * it nests. Real fonts use a handful (an accented capital is
+         * two or three). */
+        if (++P->comps > MAX_COMPONENTS) return;
         flags = ru16(r);
         uint32_t idx = ru16(r);
         int32_t  a1, a2;

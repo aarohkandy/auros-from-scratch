@@ -21,6 +21,10 @@ blog=$(MODE=regress sh "$HERE/build.sh" "$OUT" 2>&1) || { printf '%s\n' "$blog";
 export ASAN_OPTIONS="${ASAN_OPTIONS:-detect_leaks=1:abort_on_error=1}"
 export UBSAN_OPTIONS="${UBSAN_OPTIONS:-print_stacktrace=1:halt_on_error=1}"
 
+# A hang is a finding too: without a limit it would hold the CI job
+# until its own timeout. 124 is timeout(1)'s exit status.
+TMO=""; command -v timeout >/dev/null 2>&1 && TMO="timeout ${REGRESS_TIMEOUT:-300}"
+
 fail=0; ran=0
 for bin in "$OUT"/fuzz_*-regress; do
     [ -x "$bin" ] || continue
@@ -29,11 +33,13 @@ for bin in "$OUT"/fuzz_*-regress; do
     [ -d "$HERE/corpus/$t" ]  && set -- "$@" "$HERE/corpus/$t"
     [ -d "$HERE/regress/$t" ] && set -- "$@" "$HERE/regress/$t"
     [ $# -gt 0 ] || continue
-    if out=$("$bin" "$@" 2>&1); then
+    out=$($TMO "$bin" "$@" 2>&1); rc=$?
+    if [ $rc = 0 ]; then
         printf 'ok    %-8s %s\n' "$t" "$(printf '%s\n' "$out" | tail -1)"
         ran=$((ran + 1))
     else
         printf 'FAIL  %-8s\n' "$t"
+        [ $rc = 124 ] && echo "      (timed out: a hang)"
         printf '%s\n' "$out" | grep -E 'ERROR|runtime error|SUMMARY|#[0-9] ' | head -12 | sed 's/^/      /'
         fail=$((fail + 1))
     fi
